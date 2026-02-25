@@ -85,7 +85,7 @@ public sealed class Cursor
 		
 		var steps = (int)Math.Clamp(adjustedDuration.TotalMilliseconds / 16, _options.MinSteps, _options.MaxSteps);
 
-		var controlPoints = CreateControlPoints(startPos, targetPos, distance, _options.CurvaturePixels);
+		var controlPoints = CursorPathMath.CreateControlPoints(startPos, targetPos, distance, _options.CurvaturePixels);
 		
 		var totalTicks = adjustedDuration.Ticks;
 
@@ -100,7 +100,7 @@ public sealed class Cursor
 			var t = index / (float)steps;
 			
 			// point at T along bezier curve before jitter.
-			var tPoint = CubicBezier(startPos, controlPoints.C1, controlPoints.C2, targetPos, t);
+			var tPoint = CursorPathMath.CubicBezier(startPos, controlPoints.C1, controlPoints.C2, targetPos, t);
 
 			// Add small, decaying randomness so motion looks less robotic.
 			var jitterScale = Math.Max(0.0f, 1.0f - t);
@@ -114,7 +114,7 @@ public sealed class Cursor
 				tPoint = targetPos;
 			}
 
-			SetCursorPos((int)Math.Round(tPoint.X), (int)Math.Round(tPoint.Y));
+			InputNative.SendMouseAbsolute((int)Math.Round(tPoint.X), (int)Math.Round(tPoint.Y));
 
 			var remainingTicks = totalTicks - assignedTicks;
 			
@@ -132,73 +132,48 @@ public sealed class Cursor
 		}
 	}
 
-	//TODO: probably should be in a seperate class since these are general purpose mathematical extensions, not specific to cursor movement.
 	/// <summary>
-	/// Creates two randomized control points for a cubic Bezier path.
+	/// Presses a mouse button down.
 	/// </summary>
-	private static (Vector2 C1, Vector2 C2) CreateControlPoints(
-		Vector2 start,
-		Vector2 end,
-		double distance,
-		double curvaturePixels)
+	public void MouseDown(MouseButton button = MouseButton.Left)
 	{
-		// displacement from start to end.
-		var displacement = end - start;
-
-		if (distance <= double.Epsilon)
-			return (start, end);
-
-		var direction = Vector2.Normalize(displacement);
-
-		var perpendicular = new Vector2(-direction.Y, direction.X);
-		
-		// Curvature magnitude: scales with distance, clamped by config.
-		var curve = (float)Math.Min(curvaturePixels, Math.Max(8.0, distance * 0.35));
-		var alongJitter = curve * 0.2f;
-
-		// Base control points near 1/3 and 2/3 of the segment.
-		var c1Base = start + displacement * 0.33f;
-		var c2Base = start + displacement * 0.66f;
-
-		// Add randomized sideways bend + slight forward/backward jitter.
-		var c1 = c1Base
-			+ perpendicular * Random.Shared.NextFloat(-curve, curve)
-			+ direction * Random.Shared.NextFloat(-alongJitter, alongJitter);
-
-		var c2 = c2Base
-			+ perpendicular * Random.Shared.NextFloat(-curve, curve)
-			+ direction * Random.Shared.NextFloat(-alongJitter, alongJitter);
-			
-		return (c1, c2);
+		InputNative.SendMouseButtonDown(button);
 	}
 
-
-	//TODO: probably should be in a seperate class since these are general purpose mathematical extensions, not specific to cursor movement.
 	/// <summary>
-	/// Evaluates a cubic Bezier curve at t in [0, 1].
+	/// Releases a mouse button.
 	/// </summary>
-	private static Vector2 CubicBezier(
-		Vector2 p0,
-		Vector2 p1,
-		Vector2 p2,
-		Vector2 p3,
-		float t)
-	{;
-		var oneMinusT = 1f - t;
-		var oneMinusTSquared = oneMinusT * oneMinusT;
-		var tSquared = t * t;
-
-		return
-			(oneMinusTSquared * oneMinusT * p0) +
-			(3f * oneMinusTSquared * t * p1) +
-			(3f * oneMinusT * tSquared * p2) +
-			(tSquared * t * p3);
+	public void MouseUp(MouseButton button = MouseButton.Left)
+	{
+		InputNative.SendMouseButtonUp(button);
 	}
 
+	/// <summary>
+	/// Performs a full click (down + up) for a mouse button.
+	/// </summary>
+	public void Click(MouseButton button = MouseButton.Left)
+	{
+		MouseDown(button);
+		MouseUp(button);
+	}
 
-	// Win32 API: move cursor to absolute screen coordinates.
-	[DllImport("user32.dll")]
-	private static extern bool SetCursorPos(int x, int y);
+	/// <summary>
+	/// Performs a click and optionally holds the button before release.
+	/// </summary>
+	public async Task ClickAsync(
+		MouseButton button = MouseButton.Left,
+		TimeSpan? holdDuration = null,
+		CancellationToken cancellationToken = default)
+	{
+		MouseDown(button);
+
+		if (holdDuration is { } hold && hold > TimeSpan.Zero)
+		{
+			await Task.Delay(hold, cancellationToken).ConfigureAwait(false);
+		}
+
+		MouseUp(button);
+	}
 
 	// Win32 API: read current cursor coordinates.
 	[DllImport("user32.dll")]
@@ -213,4 +188,11 @@ public sealed class Cursor
 		public int X;
 		public int Y;
 	}
+}
+
+public enum MouseButton
+{
+	Left,
+	Right,
+	Middle
 }
