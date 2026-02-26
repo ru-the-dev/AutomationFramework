@@ -10,7 +10,7 @@ public sealed class TypeDemoScript : IAutomationScript
 
     public string Description => "Waits 3 seconds, then types a demo line into the active window.";
 
-    public async Task ExecuteAsync(CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
     {
         var cursor = new AutomationFramework.Cursor();
 

@@ -1,106 +1,175 @@
 ﻿using AutomationTest.Scripting;
+using Microsoft.Extensions.Configuration;
+using System.CommandLine;
 
 namespace AutomationTest;
 
 internal static class Program
 {
-    private static async Task<int> Main(string[] args)
+    private static int Main(string[] args)
     {
+        var configuration = BuildConfiguration();
         var scripts = ScriptRegistry.DiscoverScripts();
+
         if (scripts.Count == 0)
         {
             Console.WriteLine("No scripts were found. Add classes in the Scripts folder that implement IAutomationScript.");
             return 1;
         }
 
-        if (HasAnyFlag(args, "--help", "-h"))
-        {
-            PrintUsage();
-            return 0;
-        }
+        var listOption = new Option<bool>("--list", "List discovered scripts and exit.");
+        listOption.Aliases.Add("-l");
 
-        if (HasAnyFlag(args, "--list", "-l"))
+        var scriptOption = new Option<string?>("--script", "Script name or number to run.");
+        scriptOption.Aliases.Add("-s");
+
+        var rootCommand = new RootCommand("AutomationTest script runner");
+        rootCommand.Options.Add(listOption);
+        rootCommand.Options.Add(scriptOption);
+
+        rootCommand.SetAction(parseResult =>
+        {
+            var shouldList = parseResult.GetValue(listOption);
+            var requestedScript = parseResult.GetValue(scriptOption);
+
+            return ExecuteAsync(
+                    shouldList,
+                    requestedScript,
+                    configuration,
+                    scripts,
+                    CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+        });
+
+        return rootCommand.Parse(args).Invoke();
+    }
+
+    private static async Task<int> ExecuteAsync(
+        bool shouldList,
+        string? requestedScript,
+        IConfiguration configuration,
+        IReadOnlyList<IAutomationScript> scripts,
+        CancellationToken cancellationToken)
+    {
+        if (shouldList)
         {
             PrintScriptList(scripts);
             return 0;
         }
 
-        var selectedScript = ResolveScriptFromArgs(args, scripts) ?? PromptForScriptSelection(scripts);
-        if (selectedScript is null)
-        {
-            Console.WriteLine("No script selected.");
-            return 1;
-        }
-
         using var cancellationTokenSource = new CancellationTokenSource();
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationTokenSource.Token, cancellationToken);
         Console.CancelKeyPress += (_, eventArgs) =>
         {
             eventArgs.Cancel = true;
             cancellationTokenSource.Cancel();
         };
 
+        var context = new ScriptExecutionContext(configuration);
+        var isFirstIteration = true;
 
-        Console.WriteLine($"Running script: {selectedScript.Name}");
-        Console.WriteLine("Press Ctrl+C to stop.");
-
-        try
+        while (!linkedCts.Token.IsCancellationRequested)
         {
-            await selectedScript.ExecuteAsync(cancellationTokenSource.Token);
-            Console.WriteLine("Script completed.");
-            return 0;
-        }
-        catch (OperationCanceledException)
-        {
-            Console.WriteLine("Script canceled.");
-            return 2;
-        }
-    }
+            IAutomationScript? selectedScript = null;
 
-    private static bool HasAnyFlag(string[] args, params string[] flags)
-    {
-        return args.Any(argument => flags.Any(flag => string.Equals(argument, flag, StringComparison.OrdinalIgnoreCase)));
-    }
-
-    private static IAutomationScript? ResolveScriptFromArgs(IReadOnlyList<string> args, IReadOnlyList<IAutomationScript> scripts)
-    {
-        for (var index = 0; index < args.Count; index++)
-        {
-            if (!string.Equals(args[index], "--script", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(args[index], "-s", StringComparison.OrdinalIgnoreCase))
+            if (isFirstIteration)
             {
-                continue;
+                selectedScript = ResolveScriptFromSelector(requestedScript, scripts);
             }
 
-            if (index + 1 >= args.Count)
+            if (selectedScript is null)
             {
-                Console.WriteLine("Missing value after --script.");
-                return null;
+                var selection = PromptForScriptSelection(scripts);
+                if (selection.ExitRequested)
+                {
+                    Console.WriteLine("Exiting.");
+                    return 0;
+                }
+
+                selectedScript = selection.Script;
+                if (selectedScript is null)
+                {
+                    Console.WriteLine("No script selected.");
+                    Console.WriteLine();
+                    isFirstIteration = false;
+                    continue;
+                }
             }
 
-            return ResolveByNameOrIndex(args[index + 1], scripts);
+            isFirstIteration = false;
+
+
+            Console.WriteLine($"Running script: {selectedScript.Name}");
+            Console.WriteLine("Press Ctrl+C to stop.");
+
+            try
+            {
+                await selectedScript.ExecuteAsync(context, linkedCts.Token);
+                Console.WriteLine("Script completed.");
+                Console.WriteLine();
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("Script canceled.");
+                return 2;
+            }
         }
 
-        return null;
+        Console.WriteLine("Script canceled.");
+        return 2;
     }
 
-    private static IAutomationScript? PromptForScriptSelection(IReadOnlyList<IAutomationScript> scripts)
+    private static IAutomationScript? ResolveScriptFromSelector(string? selector, IReadOnlyList<IAutomationScript> scripts)
     {
-        PrintScriptList(scripts);
-        Console.Write("Select a script by number or name: ");
-
-        var input = Console.ReadLine();
-        if (string.IsNullOrWhiteSpace(input))
+        if (string.IsNullOrWhiteSpace(selector))
         {
             return null;
         }
 
-        var script = ResolveByNameOrIndex(input.Trim(), scripts);
+        return ResolveByNameOrIndex(selector, scripts);
+    }
+
+    private static IConfiguration BuildConfiguration()
+    {
+        var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? "Production";
+
+        return new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+            .AddJsonFile($"appsettings.{environment}.json", optional: true, reloadOnChange: false)
+            .Build();
+    }
+
+    private static ScriptSelection PromptForScriptSelection(IReadOnlyList<IAutomationScript> scripts)
+    {
+        PrintScriptList(scripts);
+        Console.Write("Select a script by number or name (or type 'exit'): ");
+
+        var input = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return new ScriptSelection(null, false);
+        }
+
+        var selector = input.Trim();
+        if (string.Equals(selector, "exit", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(selector, "quit", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(selector, "q", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(selector, "x", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ScriptSelection(null, true);
+        }
+
+        var script = ResolveByNameOrIndex(selector, scripts);
         if (script is null)
         {
             Console.WriteLine($"Script '{input}' was not found.");
         }
 
-        return script;
+        return new ScriptSelection(script, false);
     }
 
     private static IAutomationScript? ResolveByNameOrIndex(string selector, IReadOnlyList<IAutomationScript> scripts)
@@ -130,11 +199,6 @@ internal static class Program
         }
     }
 
-    private static void PrintUsage()
-    {
-        Console.WriteLine("Usage:");
-        Console.WriteLine("  dotnet run --project AutomationTest -- --list");
-        Console.WriteLine("  dotnet run --project AutomationTest -- --script <name|number>");
-        Console.WriteLine("  dotnet run --project AutomationTest");
-    }
+    private readonly record struct ScriptSelection(IAutomationScript? Script, bool ExitRequested);
+
 }

@@ -10,11 +10,15 @@ public sealed class VisionTestScript : IAutomationScript
 
     public string Description => "Finds a template, manually converts local match bounds to global coordinates, then clicks.";
 
-    public async Task ExecuteAsync(CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
     {
+        var ocrDataPath = context.Configuration["Vision:OcrDataPath"]
+            ?? Path.Combine(AppContext.BaseDirectory, "tessdata");
+
         using var vision = new Vision(new Vision.Options
         {
-            OcrLanguage = "eng"
+            OcrLanguage = "eng",
+            OcrDataPath = ocrDataPath
         });
 
         var cursor = new AutomationFramework.Cursor();

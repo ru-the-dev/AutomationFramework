@@ -8,7 +8,7 @@ public sealed class CursorPositionScript : IAutomationScript
 
     public string Description => "Prints the current cursor position once per second for 5 seconds.";
 
-    public async Task ExecuteAsync(CancellationToken cancellationToken)
+    public async Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
     {
         var cursor = new AutomationFramework.Cursor(); 
 

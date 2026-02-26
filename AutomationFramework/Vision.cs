@@ -19,7 +19,7 @@ public sealed class Vision : IDisposable
         /// <summary>
         /// Folder containing Tesseract language data files (.traineddata).
         /// </summary>
-        public string OcrDataPath { get; init; } = Path.Combine(AppContext.BaseDirectory, "tessdata_best");
+        public string OcrDataPath { get; init; } = Path.Combine(AppContext.BaseDirectory, "tessdata");
 
         /// <summary>
         /// Folder containing template images for matching. Defaults to "Assets/Templates" subfolder of the current directory.
