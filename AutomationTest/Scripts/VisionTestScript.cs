@@ -1,8 +1,9 @@
 using System.Numerics;
-using AutomationTest.Scripting;
+using AutomationRunner.Scripting;
 using AutomationFramework;
+using Microsoft.Extensions.Configuration;
 
-namespace AutomationTest.Scripts;
+namespace AutomationRunner.Scripts;
 
 public sealed class VisionTestScript : IAutomationScript
 {
@@ -12,13 +13,10 @@ public sealed class VisionTestScript : IAutomationScript
 
     public async Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
     {
-        var ocrDataPath = context.Configuration["Vision:OcrDataPath"]
-            ?? Path.Combine(AppContext.BaseDirectory, "tessdata");
-
         using var vision = new Vision(new Vision.Options
         {
             OcrLanguage = "eng",
-            OcrDataPath = ocrDataPath
+            OcrDataPath = context.Configuration.GetRequiredSection("OcrDataPath").Value!
         });
 
         var cursor = new AutomationFramework.Cursor();

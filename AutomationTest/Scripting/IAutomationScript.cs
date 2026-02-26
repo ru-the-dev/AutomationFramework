@@ -1,4 +1,4 @@
-namespace AutomationTest.Scripting;
+namespace AutomationRunner.Scripting;
 
 public interface IAutomationScript
 {

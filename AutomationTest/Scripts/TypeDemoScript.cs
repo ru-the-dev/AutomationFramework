@@ -1,8 +1,8 @@
-using AutomationTest.Scripting;
+using AutomationRunner.Scripting;
 using AutomationFramework;
 using System.Numerics;
 
-namespace AutomationTest.Scripts;
+namespace AutomationRunner.Scripts;
 
 public sealed class TypeDemoScript : IAutomationScript
 {

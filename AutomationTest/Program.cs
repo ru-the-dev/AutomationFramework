@@ -1,8 +1,8 @@
-﻿using AutomationTest.Scripting;
+﻿using AutomationRunner.Scripting;
 using Microsoft.Extensions.Configuration;
 using System.CommandLine;
 
-namespace AutomationTest;
+namespace AutomationRunner;
 
 internal static class Program
 {
@@ -17,13 +17,17 @@ internal static class Program
             return 1;
         }
 
-        var listOption = new Option<bool>("--list", "List discovered scripts and exit.");
-        listOption.Aliases.Add("-l");
+        var listOption = new Option<bool>("--list", "-l") 
+        {
+            Description = "List discovered scripts and exit."
+        };
 
-        var scriptOption = new Option<string?>("--script", "Script name or number to run.");
-        scriptOption.Aliases.Add("-s");
+        var scriptOption = new Option<string?>("--script", "-s")
+        {
+            Description = "The name or number of the script to run. If not specified, a selection prompt will be shown."
+        };
 
-        var rootCommand = new RootCommand("AutomationTest script runner");
+        var rootCommand = new RootCommand("AutomationRunner script runner");
         rootCommand.Options.Add(listOption);
         rootCommand.Options.Add(scriptOption);
 

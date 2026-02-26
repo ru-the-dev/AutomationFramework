@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Configuration;
 
-namespace AutomationTest.Scripting;
+namespace AutomationRunner.Scripting;
 
 public sealed class ScriptExecutionContext
 {

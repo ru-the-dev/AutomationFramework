@@ -1,6 +1,6 @@
-using AutomationTest.Scripting;
+using AutomationRunner.Scripting;
 
-namespace AutomationTest.Scripts;
+namespace AutomationRunner.Scripts;
 
 public sealed class CursorPositionScript : IAutomationScript
 {

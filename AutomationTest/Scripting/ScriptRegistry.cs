@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace AutomationTest.Scripting;
+namespace AutomationRunner.Scripting;
 
 public static class ScriptRegistry
 {
