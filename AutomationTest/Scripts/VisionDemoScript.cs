@@ -1,5 +1,6 @@
 using AutomationTest.Scripting;
 using AutomationFramework;
+using System.Numerics;
 
 namespace AutomationTest.Scripts;
 
@@ -7,16 +8,10 @@ public sealed class VisionDemoScript : IAutomationScript
 {
     public string Name => "vision-demo";
 
-    public string Description => "Captures a screenshot, optionally matches assets/template.png, and runs OCR text lookup.";
+    public string Description => "Finds a template image/OCR text and shows manual local-to-global cursor targeting.";
 
-    public Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var outputDirectory = Path.Combine(AppContext.BaseDirectory, "artifacts");
-        Directory.CreateDirectory(outputDirectory);
-
-        var screenshotPath = Path.Combine(outputDirectory, $"screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png");
         var templatePath = Path.Combine(AppContext.BaseDirectory, "assets", "template.png");
 
         using var vision = new Vision(new Vision.Options
@@ -25,8 +20,7 @@ public sealed class VisionDemoScript : IAutomationScript
             OcrLanguage = "eng"
         });
 
-        vision.SaveScreenshot(screenshotPath);
-        Console.WriteLine($"Saved screenshot: {screenshotPath}");
+        var cursor = new AutomationFramework.Cursor();
 
         if (File.Exists(templatePath))
         {
@@ -37,8 +31,22 @@ public sealed class VisionDemoScript : IAutomationScript
             }
             else
             {
+                var globalBounds = imageMatch.ToGlobalBounds();
+                var centerX = globalBounds.Left + (globalBounds.Width / 2f);
+                var centerY = globalBounds.Top + (globalBounds.Height / 2f);
+
                 Console.WriteLine(
-                    $"Template match: confidence={imageMatch.Confidence:P1}, bounds={imageMatch.Bounds.X},{imageMatch.Bounds.Y},{imageMatch.Bounds.Width},{imageMatch.Bounds.Height}");
+                    $"Template match: confidence={imageMatch.Confidence:P1}, local={imageMatch.Bounds.X},{imageMatch.Bounds.Y},{imageMatch.Bounds.Width},{imageMatch.Bounds.Height}, global={globalBounds.X},{globalBounds.Y},{globalBounds.Width},{globalBounds.Height}");
+
+                // Manual conversion is explicit in the script: local match bounds -> global screen point.
+                Console.Write("Move cursor to template center and click? (y/N): ");
+                var shouldClick = Console.ReadLine();
+                if (string.Equals(shouldClick, "y", StringComparison.OrdinalIgnoreCase))
+                {
+                    await cursor.MoveToAsync(new Vector2(centerX, centerY), TimeSpan.FromMilliseconds(450), cancellationToken);
+                    cursor.Click();
+                    Console.WriteLine("Clicked template center.");
+                }
             }
         }
         else
@@ -69,8 +77,9 @@ public sealed class VisionDemoScript : IAutomationScript
 
                 foreach (var match in matches.Take(5))
                 {
+                    var global = match.ToGlobalBounds();
                     Console.WriteLine(
-                        $"- '{match.Text}' conf={match.Confidence:P1} at {match.Bounds.X},{match.Bounds.Y},{match.Bounds.Width},{match.Bounds.Height}");
+                        $"- '{match.Text}' conf={match.Confidence:P1} local={match.Bounds.X},{match.Bounds.Y},{match.Bounds.Width},{match.Bounds.Height} global={global.X},{global.Y},{global.Width},{global.Height}");
                 }
             }
         }
@@ -80,6 +89,5 @@ public sealed class VisionDemoScript : IAutomationScript
             Console.WriteLine("OCR setup: copy tessdata (for example eng.traineddata) to AutomationTest/bin/Debug/net10.0-windows/tessdata.");
         }
 
-        return Task.CompletedTask;
     }
 }

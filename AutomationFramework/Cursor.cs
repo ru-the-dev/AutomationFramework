@@ -9,6 +9,9 @@ namespace AutomationFramework;
 /// </summary>
 public sealed class Cursor
 {
+    /// <summary>
+    /// Configuration values that control cursor movement behavior.
+    /// </summary>
     public record class Options
 	{
 		public float MinDurationFactor { get; init; } = 0.9f;
@@ -131,6 +134,7 @@ public sealed class Cursor
 			}
 		}
 	}
+
 
 	/// <summary>
 	/// Presses a mouse button down.

@@ -39,14 +39,13 @@ internal static class Program
             cancellationTokenSource.Cancel();
         };
 
-        var context = new ScriptExecutionContext();
 
         Console.WriteLine($"Running script: {selectedScript.Name}");
         Console.WriteLine("Press Ctrl+C to stop.");
 
         try
         {
-            await selectedScript.ExecuteAsync(context, cancellationTokenSource.Token);
+            await selectedScript.ExecuteAsync(cancellationTokenSource.Token);
             Console.WriteLine("Script completed.");
             return 0;
         }

@@ -27,13 +27,14 @@ internal static class InputNative
 
     internal static void SendMouseAbsolute(int x, int y)
     {
-        var virtualLeft = GetSystemMetrics(SmXVirtualScreen);
-        var virtualTop = GetSystemMetrics(SmYVirtualScreen);
-        var virtualWidth = Math.Max(1, GetSystemMetrics(SmCxVirtualScreen));
-        var virtualHeight = Math.Max(1, GetSystemMetrics(SmCyVirtualScreen));
+        // Framework-standard coordinate system: full virtual desktop.
+        var left = GetSystemMetrics(SmXVirtualScreen);
+        var top = GetSystemMetrics(SmYVirtualScreen);
+        var width = Math.Max(1, GetSystemMetrics(SmCxVirtualScreen));
+        var height = Math.Max(1, GetSystemMetrics(SmCyVirtualScreen));
 
-        var normalizedX = NormalizeAbsoluteCoordinate(x, virtualLeft, virtualWidth);
-        var normalizedY = NormalizeAbsoluteCoordinate(y, virtualTop, virtualHeight);
+        var normalizedX = NormalizeAbsoluteCoordinate(x, left, width);
+        var normalizedY = NormalizeAbsoluteCoordinate(y, top, height);
 
         var input = new Input
         {

@@ -1,5 +1,6 @@
 using AutomationTest.Scripting;
 using AutomationFramework;
+using System.Numerics;
 
 namespace AutomationTest.Scripts;
 
@@ -9,16 +10,23 @@ public sealed class TypeDemoScript : IAutomationScript
 
     public string Description => "Waits 3 seconds, then types a demo line into the active window.";
 
-    public async Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
+    public async Task ExecuteAsync(CancellationToken cancellationToken)
     {
-        Console.WriteLine("Focus the target app. Typing starts in 3 seconds...");
-        await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+        var cursor = new AutomationFramework.Cursor();
 
-        await context.Keyboard.TypeTextAsync(
-            "Hello from AutomationFramework script host!",
-            TimeSpan.FromMilliseconds(35),
-            cancellationToken);
+        await cursor.MoveToAsync(new Vector2(0, 900), TimeSpan.FromSeconds(5.3), cancellationToken);
 
-        context.Keyboard.PressKey(VirtualKey.Enter);
+
+        // var keyboard = new Keyboard();
+
+        // Console.WriteLine("Focus the target app. Typing starts in 3 seconds...");
+        // await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+
+        // await keyboard.TypeTextAsync(
+        //     "Hello from AutomationFramework script host!",
+        //     TimeSpan.FromMilliseconds(35),
+        //     cancellationToken);
+
+        // keyboard.PressKey(VirtualKey.Enter);
     }
 }

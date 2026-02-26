@@ -6,5 +6,5 @@ public interface IAutomationScript
 
     string Description { get; }
 
-    Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken);
+    Task ExecuteAsync(CancellationToken cancellationToken);
 }
