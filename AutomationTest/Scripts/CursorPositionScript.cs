@@ -15,8 +15,7 @@ public sealed class CursorPositionScript : IAutomationScript
         for (var second = 1; second <= 5; second++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var position = cursor.GetCurrentPosition();
-            Console.WriteLine($"[{second}] X={position.X:0}, Y={position.Y:0}");
+            
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
         }
     }

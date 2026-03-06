@@ -8,6 +8,7 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        var hotkeyManager = new GlobalHotkeyManager.HotkeyManager();
         var configuration = BuildConfiguration();
         var scripts = ScriptRegistry.DiscoverScripts();
 
@@ -27,14 +28,40 @@ internal static class Program
             Description = "The name or number of the script to run. If not specified, a selection prompt will be shown."
         };
 
+        var cursorOption = new Option<bool>("--cursor", "-c")
+        {
+            Description = "Enter cursor mode"
+        };
+
         var rootCommand = new RootCommand("AutomationRunner script runner");
         rootCommand.Options.Add(listOption);
         rootCommand.Options.Add(scriptOption);
+        rootCommand.Options.Add(cursorOption);
 
-        rootCommand.SetAction(parseResult =>
+        rootCommand.SetAction(async parseResult =>
         {
             var shouldList = parseResult.GetValue(listOption);
             var requestedScript = parseResult.GetValue(scriptOption);
+            var cursorMode = parseResult.GetValue(cursorOption);
+
+            if (cursorMode)
+            {
+                hotkeyManager.RegisterHotkey(Keys.F1, GlobalHotkeyManager.KeyModifiers.None);
+                var cursor = new AutomationFramework.Cursor();
+                
+                hotkeyManager.HotkeyPressed += (sender, eventArgs) =>
+                {
+                    if (eventArgs.Key == Keys.F1)
+                    {
+                        
+                        var position = cursor.GetCurrentPosition();
+                        Console.WriteLine($"Hotkey pressed! Current cursor position: X={position.X:0}, Y={position.Y:0}");
+                    }
+                };
+                
+                
+                await Task.Delay(-1);
+            }
 
             return ExecuteAsync(
                     shouldList,
