@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="AutomationTest/AutomationRunner.csproj" />
   <Project Path="AutomationFramework/AutomationFramework.csproj" />
+  <Project Path="AutomationRunner/AutomationRunner.csproj" />
   <Project Path="GlobalHotKeyManager/GlobalHotKeyManager.csproj" />
 </Solution>

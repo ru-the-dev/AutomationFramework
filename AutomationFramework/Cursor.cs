@@ -14,31 +14,55 @@ public sealed class Cursor
     /// </summary>
     public record class Options
 	{
-		public float MinDurationFactor { get; init; } = 0.9f;
-		public float MaxDurationFactor { get; init; } = 1.2f;
-		public float CurvaturePixels { get; init; } = 3500;
-		public float PathJitterPixels { get; init; } = 1.4f;
-		public int MinSteps { get; init; } = 24;
-		public int MaxSteps { get; init; } = 150;
+		public float MinSpeedFactor { get; init; } = 0.8f;
+		public float MaxSpeedFactor { get; init; } = 1.2f;
+		public float MovePathCurvaturePixels { get; init; } = 3500;
+		public float MovePathJitterPixels { get; init; } = 1.4f;
+		public int MinMoveSteps { get; init; } = 24;
+		public int MaxMoveSteps { get; init; } = 150;
+
+		public TimeSpan DefaultClickHoldDuration { get; init; } = TimeSpan.FromMilliseconds(100);
 
         internal void Validate()
         {
-            if (MinDurationFactor <= 0 || MaxDurationFactor <= 0)
+            if (MinSpeedFactor <= 0 || MaxSpeedFactor <= 0)
             {
-                throw new ArgumentOutOfRangeException("Duration factors must be greater than zero.");
+                throw new ArgumentOutOfRangeException("Speed factors must be greater than zero.");
             }
 
-            if (MinDurationFactor > MaxDurationFactor)
+            if (MinSpeedFactor > MaxSpeedFactor)
             {
-                throw new ArgumentException("MinDurationFactor cannot be greater than MaxDurationFactor.");
+                throw new ArgumentException("MinSpeedFactor cannot be greater than MaxSpeedFactor.");
             }
-        }
 
+			if (MovePathCurvaturePixels < 0)
+			{
+				throw new ArgumentOutOfRangeException(nameof(MovePathCurvaturePixels), "MovePathCurvaturePixels cannot be negative.");
+			}
+
+			if (MovePathJitterPixels < 0)
+			{
+				throw new ArgumentOutOfRangeException(nameof(MovePathJitterPixels), "MovePathJitterPixels cannot be negative.");
+			}
+
+			if (MinMoveSteps < 1)
+			{
+				throw new ArgumentOutOfRangeException(nameof(MinMoveSteps), "MinMoveSteps must be at least 1.");
+			}
+
+			if (MaxMoveSteps < MinMoveSteps)
+			{
+				throw new ArgumentException("MaxMoveSteps cannot be less than MinMoveSteps.");
+			}
+
+			if (DefaultClickHoldDuration < TimeSpan.Zero)
+			{
+				throw new ArgumentOutOfRangeException(nameof(DefaultClickHoldDuration), "DefaultClickHoldDuration cannot be negative.");
+			}
+		}
 	}
 
 	private readonly Options _options;
-
-    
 
 	/// <summary>
 	/// Creates a mouse mover with default options that will be reused for each move call.
@@ -65,8 +89,32 @@ public sealed class Cursor
 	/// </summary>
 	public async Task MoveToAsync(
 		Vector2 targetPos,
+		float speedPixelsPerSecond = 1500f,
+		CancellationToken cancellationToken = default)
+	{
+		if (speedPixelsPerSecond <= 0 || float.IsNaN(speedPixelsPerSecond) || float.IsInfinity(speedPixelsPerSecond))
+			throw new ArgumentOutOfRangeException(nameof(speedPixelsPerSecond), "Speed must be a finite value greater than zero.");
+
+		var startPos = GetCurrentPosition();
+		var distance = Vector2.Distance(startPos, targetPos);
+
+		if (distance < float.Epsilon)
+			return;
+
+		var durationTicks = Math.Max(
+			1L,
+			(long)Math.Round(TimeSpan.TicksPerSecond * (distance / speedPixelsPerSecond)));
+
+		await MoveToAsync(targetPos, TimeSpan.FromTicks(durationTicks), cancellationToken).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Moves the cursor using this instance's configured options.
+	/// </summary>
+	public async Task MoveToAsync(
+		Vector2 targetPos,
 		TimeSpan duration,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken = default)
 	{
 		// Basic input validation.
 		if (duration <= TimeSpan.Zero)
@@ -76,7 +124,7 @@ public sealed class Cursor
 		if (!GetCursorPos(out var startPoint))
 			throw new InvalidOperationException("Failed to read the current cursor position.");
 
-		var adjustedDuration = Duration.ApplyRandomFactor(duration, _options.MinDurationFactor, _options.MaxDurationFactor);
+		var adjustedDuration = Duration.ApplyRandomFactor(duration, _options.MinSpeedFactor, _options.MaxSpeedFactor);
 		var startPos = new Vector2(startPoint.X, startPoint.Y);
 
 		var distance = Vector2.Distance(startPos, targetPos);
@@ -86,9 +134,9 @@ public sealed class Cursor
 			return;
 
 		
-		var steps = (int)Math.Clamp(adjustedDuration.TotalMilliseconds / 16, _options.MinSteps, _options.MaxSteps);
+		var steps = (int)Math.Clamp(adjustedDuration.TotalMilliseconds / 16, _options.MinMoveSteps, _options.MaxMoveSteps);
 
-		var controlPoints = CursorPathMath.CreateControlPoints(startPos, targetPos, distance, _options.CurvaturePixels);
+		var controlPoints = CursorPathMath.CreateControlPoints(startPos, targetPos, distance, _options.MovePathCurvaturePixels);
 		
 		var totalTicks = adjustedDuration.Ticks;
 
@@ -107,7 +155,7 @@ public sealed class Cursor
 
 			// Add small, decaying randomness so motion looks less robotic.
 			var jitterScale = Math.Max(0.0f, 1.0f - t);
-			var jitter = _options.PathJitterPixels * jitterScale;
+			var jitter = _options.MovePathJitterPixels * jitterScale;
 			tPoint.X += Random.Shared.NextFloat(-jitter, jitter);
 			tPoint.Y += Random.Shared.NextFloat(-jitter, jitter);
 
@@ -126,7 +174,8 @@ public sealed class Cursor
 				// Split remaining time across remaining steps with slight timing jitter.
 				var baselineTicks = remainingTicks / (steps - index + 1);
 				var jitterFactor = Random.Shared.NextFloat(0.7f, 1.3f);
-				var delayTicks = (long)Math.Clamp(baselineTicks * jitterFactor, TimeSpan.TicksPerMillisecond, remainingTicks);
+				var minDelayTicks = Math.Min(TimeSpan.TicksPerMillisecond, remainingTicks);
+				var delayTicks = (long)Math.Clamp(baselineTicks * jitterFactor, minDelayTicks, remainingTicks);
 
 
 				assignedTicks += delayTicks;
@@ -134,7 +183,6 @@ public sealed class Cursor
 			}
 		}
 	}
-
 
 	/// <summary>
 	/// Presses a mouse button down.
@@ -152,14 +200,6 @@ public sealed class Cursor
 		InputNative.SendMouseButtonUp(button);
 	}
 
-	/// <summary>
-	/// Performs a full click (down + up) for a mouse button.
-	/// </summary>
-	public void Click(MouseButton button = MouseButton.Left)
-	{
-		MouseDown(button);
-		MouseUp(button);
-	}
 
 	/// <summary>
 	/// Performs a click and optionally holds the button before release.
@@ -169,11 +209,17 @@ public sealed class Cursor
 		TimeSpan? holdDuration = null,
 		CancellationToken cancellationToken = default)
 	{
+		// apply default if not specified
+		holdDuration ??= _options.DefaultClickHoldDuration;
+
+		// then apply random factor to whatever the hold duration is.
+		holdDuration = Duration.ApplyRandomFactor(holdDuration.Value, _options.MinSpeedFactor, _options.MaxSpeedFactor);
+
 		MouseDown(button);
 
-		if (holdDuration is { } hold && hold > TimeSpan.Zero)
+		if (holdDuration > TimeSpan.Zero)
 		{
-			await Task.Delay(hold, cancellationToken).ConfigureAwait(false);
+			await Task.Delay(holdDuration.Value, cancellationToken).ConfigureAwait(false);
 		}
 
 		MouseUp(button);

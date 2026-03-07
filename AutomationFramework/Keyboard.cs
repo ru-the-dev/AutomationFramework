@@ -5,9 +5,42 @@ namespace AutomationFramework;
 /// </summary>
 public sealed class Keyboard
 {
+
+    /// <summary>
+    /// Configuration values that control keyboard input behavior.
+    /// </summary>
     public sealed record class Options
     {
-        
+        public float MinDurationFactor { get; init; } = 0.9f;
+		public float MaxDurationFactor { get; init; } = 1.2f;
+
+        public TimeSpan DefaultKeyPressDuration { get; init; } = TimeSpan.FromMilliseconds(80);
+
+        internal void Validate()
+        {
+            if (MinDurationFactor <= 0 || MaxDurationFactor <= 0)
+            {
+                throw new ArgumentOutOfRangeException("Duration factors must be greater than zero.");
+            }
+
+            if (MinDurationFactor > MaxDurationFactor)
+            {
+                throw new ArgumentException("MinDurationFactor cannot be greater than MaxDurationFactor.");
+            }
+            
+            if (DefaultKeyPressDuration < TimeSpan.Zero)
+			{
+				throw new ArgumentOutOfRangeException(nameof(DefaultKeyPressDuration), "DefaultKeyPressDuration cannot be negative.");
+			}
+        }
+    }
+
+    private readonly Options _options;
+
+    public Keyboard(Options? options = null)
+    {
+        _options = options ?? new Options();
+        _options.Validate();
     }
 
     /// <summary>
@@ -45,26 +78,9 @@ public sealed class Keyboard
     /// <summary>
     /// Sends a full key press (down + up) for a virtual-key code.
     /// </summary>
-    public void PressKey(VirtualKey virtualKey)
-    {
-        PressKey((ushort)virtualKey);
-    }
-
-    /// <summary>
-    /// Sends a full key press (down + up) for a virtual-key code.
-    /// </summary>
-    public void PressKey(ushort virtualKey)
-    {
-        KeyDown(virtualKey);
-        KeyUp(virtualKey);
-    }
-
-    /// <summary>
-    /// Sends a full key press (down + up) for a virtual-key code.
-    /// </summary>
     public Task PressKeyAsync(
         VirtualKey virtualKey,
-        TimeSpan holdDuration,
+        TimeSpan? holdDuration = null,
         CancellationToken cancellationToken = default)
     {
         return PressKeyAsync((ushort)virtualKey, holdDuration, cancellationToken);
@@ -75,52 +91,32 @@ public sealed class Keyboard
     /// </summary>
     public async Task PressKeyAsync(
         ushort virtualKey,
-        TimeSpan holdDuration,
+        TimeSpan? holdDuration = null,
         CancellationToken cancellationToken = default)
     {
-        if (holdDuration < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(holdDuration), "Hold duration cannot be negative.");
-        }
+        holdDuration = holdDuration ?? _options.DefaultKeyPressDuration;
+        holdDuration = Duration.ApplyRandomFactor(holdDuration.Value, _options.MinDurationFactor, _options.MaxDurationFactor);
 
         KeyDown(virtualKey);
+
         if (holdDuration > TimeSpan.Zero)
         {
-            await Task.Delay(holdDuration, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(holdDuration.Value, cancellationToken).ConfigureAwait(false);
         }
 
         KeyUp(virtualKey);
     }
 
-    /// <summary>
-    /// Presses a key chord such as Control + C.
-    /// </summary>
-    public void PressChord(params VirtualKey[] virtualKeys)
-    {
-        ArgumentNullException.ThrowIfNull(virtualKeys);
-        if (virtualKeys.Length == 0)
-        {
-            throw new ArgumentException("At least one key is required.", nameof(virtualKeys));
-        }
-
-        foreach (var key in virtualKeys)
-        {
-            KeyDown(key);
-        }
-
-        for (var index = virtualKeys.Length - 1; index >= 0; index--)
-        {
-            KeyUp(virtualKeys[index]);
-        }
-    }
 
     /// <summary>
     /// Presses a key chord and holds it before release.
     /// </summary>
     public async Task PressChordAsync(
-        TimeSpan holdDuration,
-        CancellationToken cancellationToken = default,
-        params VirtualKey[] virtualKeys)
+        VirtualKey[] virtualKeys,
+        TimeSpan? keypressInterval = null,
+        TimeSpan? holdDuration = null,
+        CancellationToken cancellationToken = default
+    )
     {
         ArgumentNullException.ThrowIfNull(virtualKeys);
         if (virtualKeys.Length == 0)
@@ -128,23 +124,25 @@ public sealed class Keyboard
             throw new ArgumentException("At least one key is required.", nameof(virtualKeys));
         }
 
-        if (holdDuration < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(holdDuration), "Hold duration cannot be negative.");
-        }
+        holdDuration ??= _options.DefaultKeyPressDuration;
+        keypressInterval ??= _options.DefaultKeyPressDuration;
 
         foreach (var key in virtualKeys)
         {
             KeyDown(key);
+            var interval = keypressInterval.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
+            await Task.Delay(interval, cancellationToken).ConfigureAwait(false); 
         }
 
         if (holdDuration > TimeSpan.Zero)
         {
-            await Task.Delay(holdDuration, cancellationToken).ConfigureAwait(false);
+            var durationRandomized = holdDuration.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
+            await Task.Delay(durationRandomized, cancellationToken).ConfigureAwait(false);
         }
 
         for (var index = virtualKeys.Length - 1; index >= 0; index--)
         {
+            //TODO: consider adding a small random delay between key releases to better simulate human behavior.
             KeyUp(virtualKeys[index]);
         }
     }
@@ -172,20 +170,17 @@ public sealed class Keyboard
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        var delay = charDelay ?? TimeSpan.Zero;
-        if (delay < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(charDelay), "Character delay cannot be negative.");
-        }
+        charDelay ??= _options.DefaultKeyPressDuration;
 
         foreach (var character in text)
         {
             cancellationToken.ThrowIfCancellationRequested();
             InputNative.SendUnicodeChar(character);
 
-            if (delay > TimeSpan.Zero)
+            if (charDelay > TimeSpan.Zero)
             {
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                var randomizedDelay = charDelay.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
+                await Task.Delay(randomizedDelay, cancellationToken).ConfigureAwait(false);
             }
         }
     }

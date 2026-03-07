@@ -142,7 +142,6 @@ namespace GlobalHotkeyManager
             {
                 if (m.Msg == WmHotkey)
                 {
-                    Console.WriteLine($"WParam: {m.WParam}, LParam: {m.LParam}");
                     _owner.RaiseHotkeyPressed(new HotkeyEventArgs(m.LParam));
                 }
 

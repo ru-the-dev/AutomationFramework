@@ -10,9 +10,6 @@ public sealed class WristCraftingScript : IAutomationScript
 
     public string Description => "Crafts items using the wrist crafting method";
 
-
-
-
     public async Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
     {
         var tailoringButtonPos = new Vector2(2264, 1309);
@@ -30,43 +27,32 @@ public sealed class WristCraftingScript : IAutomationScript
         
         while (true)
         {
-            await cursor.MoveToAsync(tailoringButtonPos, TimeSpan.FromMilliseconds(500), cancellationToken);
-            cursor.Click();
+            await cursor.MoveToAsync(tailoringButtonPos, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(cancellationToken: cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-            await cursor.MoveToAsync(createAllPos, TimeSpan.FromMilliseconds(500), cancellationToken);
-            cursor.Click();
+            await cursor.MoveToAsync(createAllPos, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(cancellationToken: cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(Random.Shared.Next(130, 170)), cancellationToken);
             
             
-            await cursor.MoveToAsync(closeTailoringButtonPos, TimeSpan.FromMilliseconds(500), cancellationToken);
-            cursor.Click();
+            await cursor.MoveToAsync(closeTailoringButtonPos, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(cancellationToken: cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
-            await cursor.MoveToAsync(mountButtonPos, TimeSpan.FromMilliseconds(500), cancellationToken);
-            cursor.Click();
+            await cursor.MoveToAsync(mountButtonPos, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(cancellationToken: cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
-            await cursor.MoveToAsync(mailNPCPos, TimeSpan.FromMilliseconds(500), cancellationToken);
-            cursor.Click(AutomationFramework.MouseButton.Right);
+            await cursor.MoveToAsync(mailNPCPos, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(AutomationFramework.MouseButton.Right, cancellationToken: cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-            await cursor.MoveToAsync(groupSectionPos, TimeSpan.FromMilliseconds(500), cancellationToken);
-            cursor.Click();
+            await cursor.MoveToAsync(groupSectionPos, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(cancellationToken: cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-            await cursor.MoveToAsync(sendMailButtonPos, TimeSpan.FromMilliseconds(500), cancellationToken);
-            cursor.Click();
+            await cursor.MoveToAsync(sendMailButtonPos, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(cancellationToken: cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(Random.Shared.Next(10, 15)), cancellationToken);
-            await cursor.MoveToAsync(closeMailButtonPos, TimeSpan.FromMilliseconds(500), cancellationToken);
-            cursor.Click();
+            await cursor.MoveToAsync(closeMailButtonPos, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(cancellationToken: cancellationToken);
             await Task.Delay(TimeSpan.FromSeconds(Random.Shared.Next(5, 10)), cancellationToken);           
         }
-
-
-        
-    }
-
-
-    private Vector2 GetRandomPointInBounds(RectangleF bounds)
-    {
-        var x = (float)(bounds.X + Random.Shared.NextFloat(0f, bounds.Width));
-        var y = (float)(bounds.Top + Random.Shared.NextFloat(0f, bounds.Height));
-        return new Vector2(x, y);
     }
 }

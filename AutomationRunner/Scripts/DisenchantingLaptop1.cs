@@ -4,15 +4,15 @@ using AutomationRunner.Scripting;
 
 namespace AutomationRunner.Scripts;
 
-public sealed class DisenchantingScript1 : IAutomationScript
+public sealed class DisenchantingLaptop1 : IAutomationScript
 {
-    public string Name => "disenchanting-script-1";
+    public string Name => "disenchanting-laptop-1";
 
     public string Description => "Disenchants and opens mailbox";
 
-    private RectangleF DisenchantButtonBounds = new RectangleF(1830, 868, 279, 21); // Example bounds for the "Disenchant" button
+    private RectangleF DisenchantButtonBounds = new RectangleF(659, 597, 225, 14); // Example bounds for the "Disenchant" button
 
-    private RectangleF MailboxBounds = new RectangleF(1298, 932, 282, 20); // Example bounds for the mailbox
+    private RectangleF MailboxBounds = new RectangleF(133, 482, 100, 8); // Example bounds for the mailbox
 
 
     public async Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
@@ -29,8 +29,8 @@ public sealed class DisenchantingScript1 : IAutomationScript
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var target = GetRandomPointInBounds(DisenchantButtonBounds);
-                await cursor.MoveToAsync(target, TimeSpan.FromMilliseconds(200), cancellationToken);
-                cursor.Click();
+                await cursor.MoveToAsync(target, cancellationToken: cancellationToken);
+                await cursor.ClickAsync(cancellationToken: cancellationToken);
 
                 // Wait a random time between clicks to mimic human behavior
                 await Task.Delay(Random.Shared.Next(2500, 3500), cancellationToken);
@@ -38,8 +38,8 @@ public sealed class DisenchantingScript1 : IAutomationScript
 
             // After clicking the "Disenchant" button several times, click the mailbox
             var mailboxTarget = GetRandomPointInBounds(MailboxBounds);
-            await cursor.MoveToAsync(mailboxTarget, TimeSpan.FromMilliseconds(200), cancellationToken);
-            cursor.Click();
+            await cursor.MoveToAsync(mailboxTarget, cancellationToken: cancellationToken);
+            await cursor.ClickAsync(cancellationToken: cancellationToken);
         }
 
 

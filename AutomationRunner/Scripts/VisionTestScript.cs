@@ -35,7 +35,7 @@ public sealed class VisionTestScript : IAutomationScript
             globalBounds.Top + (globalBounds.Height / 2f));
 
         await cursor.MoveToAsync(target, TimeSpan.FromMilliseconds(450), cancellationToken);
-        cursor.Click();
+        await cursor.ClickAsync(cancellationToken: cancellationToken);
 
         Console.WriteLine($"Clicked at X={target.X:0}, Y={target.Y:0}");
     }
