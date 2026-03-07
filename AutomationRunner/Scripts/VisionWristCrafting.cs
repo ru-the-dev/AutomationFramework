@@ -87,7 +87,7 @@ public sealed class VisionWristCrafting : BaseScript
             await Task.Delay(TimeSpan.FromSeconds(Random.Shared.NextFloat(2, 3)), cancellationToken);
 
             // Click TSM max button
-            var maxButtonImageMatch = await _vision.FindImageAsync(_templates[VisionTemplateFileNames.TsmMaxButton], 0.8, cancellationToken: cancellationToken, searchRegion: searchRegion);
+            var maxButtonImageMatch = await _vision.FindImageAsync(_templates[VisionTemplateFileNames.TsmMaxButton], 0.7, cancellationToken: cancellationToken, searchRegion: searchRegion);
             if (maxButtonImageMatch == null)
             {
                 Console.WriteLine("Max button not found.");
@@ -99,7 +99,7 @@ public sealed class VisionWristCrafting : BaseScript
             await _cursor.ClickAsync();
 
             // Click TSM craft button
-            var craftButtonImageMatch = await _vision.FindImageAsync(_templates[VisionTemplateFileNames.TsmCraftButton], 0.75, cancellationToken: cancellationToken, searchRegion: searchRegion);
+            var craftButtonImageMatch = await _vision.FindImageAsync(_templates[VisionTemplateFileNames.TsmCraftButton], 0.7, cancellationToken: cancellationToken, searchRegion: searchRegion);
             if (craftButtonImageMatch == null)
             {
                 Console.WriteLine("Craft button not found.");
@@ -167,7 +167,7 @@ public sealed class VisionWristCrafting : BaseScript
             await Task.Delay(TimeSpan.FromSeconds(0.5), cancellationToken);
 
             // click the TSM mailbox groups button
-            var tsmMailboxGroupsImageMatch = await _vision.FindImageAsync(_templates[VisionTemplateFileNames.TsmMailboxGroupsButton], 0.8, cancellationToken: cancellationToken, searchRegion: searchRegion);
+            var tsmMailboxGroupsImageMatch = await _vision.FindImageAsync(_templates[VisionTemplateFileNames.TsmMailboxGroupsButton], 0.7, cancellationToken: cancellationToken, searchRegion: searchRegion);
             if (tsmMailboxGroupsImageMatch == null)
             {
                 Console.WriteLine("Groups button not found.");

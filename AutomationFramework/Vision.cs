@@ -165,6 +165,9 @@ public sealed class Vision : IDisposable
         Rectangle? searchRegion = null, 
         int attempts = 10,
         int retryDelayMs = 250,
+        float scaleStep = 0.05f,
+        float maxScale = 2.0f,
+        float minScale = 0.25f,
         CancellationToken cancellationToken = default
     )
     {
@@ -182,7 +185,7 @@ public sealed class Vision : IDisposable
        
         try
         {
-            return await FindImageAsync(templateMat, minConfidence, searchRegion, attempts, retryDelayMs, cancellationToken);
+            return await FindImageAsync(templateMat, minConfidence, searchRegion, attempts, retryDelayMs, scaleStep, maxScale, minScale, cancellationToken);
         }
         finally
         {
@@ -219,6 +222,9 @@ public sealed class Vision : IDisposable
         Rectangle? searchRegion = null, 
         int attempts = 10,
         int retryDelayMs = 250,
+        float scaleStep = 0.05f,
+        float maxScale = 2.0f,
+        float minScale = 0.25f,
         CancellationToken cancellationToken = default
     )
     {
@@ -226,7 +232,7 @@ public sealed class Vision : IDisposable
         ArgumentNullException.ThrowIfNull(templateBitmap);
 
         using var templateMat = ConvertBitmapToMat(templateBitmap);
-        return await FindImageAsync(templateMat, minConfidence, searchRegion, attempts, retryDelayMs, cancellationToken);
+        return await FindImageAsync(templateMat, minConfidence, searchRegion, attempts, retryDelayMs, scaleStep, maxScale, minScale, cancellationToken);
     }
 
     public async Task<ImageMatchResult?> FindImageAsync
@@ -236,6 +242,9 @@ public sealed class Vision : IDisposable
         Rectangle? searchRegion = null, 
         int attempts = 10,
         int retryDelayMs = 250,
+        float scaleStep = 0.05f,
+        float maxScale = 2.0f,
+        float minScale = 0.25f,
         CancellationToken cancellationToken = default
     )
     {
@@ -263,6 +272,8 @@ public sealed class Vision : IDisposable
             throw new InvalidOperationException("Template image is empty or could not be decoded.");
         }
 
+        var scales = GenerateScalesInBFSOrder();
+
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -270,37 +281,70 @@ public sealed class Vision : IDisposable
                 break;
             }
 
-            // Convert current screen region and template to OpenCV matrices.
+            // Convert current screen region to OpenCV matrix once per attempt
             using var screenshot = CaptureScreenshot(region);
             using var searchMat = ConvertBitmapToMat(screenshot);
 
-            if (templateMat.Width > searchMat.Width || templateMat.Height > searchMat.Height)
+            // Try each scale in BFS order (1.0, 0.8, 1.2, 0.6, 1.4, ...)
+            foreach (var scale in scales)
             {
-                throw new ArgumentException("Template image is larger than the search area.", nameof(templateMat));
-            }
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
 
-            var resultWidth = searchMat.Width - templateMat.Width + 1;
-            var resultHeight = searchMat.Height - templateMat.Height + 1;
+                // Resize template to this scale
+                Mat scaledTemplate;
+                if (Math.Abs(scale - 1.0) > 0.001)
+                {
+                    scaledTemplate = new Mat();
+                    int scaledWidth = Math.Max(1, (int)(templateMat.Width * scale));
+                    int scaledHeight = Math.Max(1, (int)(templateMat.Height * scale));
+                    Cv2.Resize(templateMat, scaledTemplate, new OpenCvSharp.Size(scaledWidth, scaledHeight), interpolation: InterpolationFlags.Linear);
+                }
+                else
+                {
+                    scaledTemplate = templateMat;
+                }
 
-            // MatchTemplate produces a score map: one score for each possible template position.
-            using var resultMat = new Mat(resultHeight, resultWidth, MatType.CV_32FC1);
-            Cv2.MatchTemplate(searchMat, templateMat, resultMat, _options.TemplateMatchMode);
-            Cv2.MinMaxLoc(resultMat, out var minValue, out var maxValue, out var minLocation, out var maxLocation);
+                try
+                {
+                    if (scaledTemplate.Width > searchMat.Width || scaledTemplate.Height > searchMat.Height)
+                    {
+                        continue; // Template too large at this scale, try next scale
+                    }
 
-            // For SqDiff modes, lower is better so we invert to a confidence-like score.
-            var (confidence, location) = IsLowerScoreBetter(_options.TemplateMatchMode)
-                ? (1 - minValue, minLocation)
-                : (maxValue, maxLocation);
+                    var resultWidth = searchMat.Width - scaledTemplate.Width + 1;
+                    var resultHeight = searchMat.Height - scaledTemplate.Height + 1;
 
-            if (confidence >= minConfidence)
-            {
-                var localBounds = new Rectangle(
-                    location.X,
-                    location.Y,
-                    templateMat.Width,
-                    templateMat.Height);
+                    // MatchTemplate produces a score map: one score for each possible template position.
+                    using var resultMat = new Mat(resultHeight, resultWidth, MatType.CV_32FC1);
+                    Cv2.MatchTemplate(searchMat, scaledTemplate, resultMat, _options.TemplateMatchMode);
+                    Cv2.MinMaxLoc(resultMat, out var minValue, out var maxValue, out var minLocation, out var maxLocation);
 
-                return new ImageMatchResult(localBounds, confidence, region);
+                    // For SqDiff modes, lower is better so we invert to a confidence-like score.
+                    var (confidence, location) = IsLowerScoreBetter(_options.TemplateMatchMode)
+                        ? (1 - minValue, minLocation)
+                        : (maxValue, maxLocation);
+
+                    if (confidence >= minConfidence)
+                    {
+                        var localBounds = new Rectangle(
+                            location.X,
+                            location.Y,
+                            scaledTemplate.Width,
+                            scaledTemplate.Height);
+
+                        return new ImageMatchResult(localBounds, confidence, region);
+                    }
+                }
+                finally
+                {
+                    if (Math.Abs(scale - 1.0) > 0.001)
+                    {
+                        scaledTemplate?.Dispose();
+                    }
+                }
             }
 
             if (attempt < attempts && retryDelayMs > 0)
@@ -310,6 +354,29 @@ public sealed class Vision : IDisposable
         }
 
         return null;
+    }
+
+    private static double[] GenerateScalesInBFSOrder(double minScale = 0.2, double maxScale = 2.0, double interval = 0.2)
+    {
+        var scales = new List<double> { 1.0 };
+
+        for (double offset = interval; offset <= 1.0; offset += interval)
+        {
+            double below = 1.0 - offset;
+            double above = 1.0 + offset;
+
+            if (below >= minScale)
+            {
+                scales.Add(below);
+            }
+
+            if (above <= maxScale)
+            {
+                scales.Add(above);
+            }
+        }
+
+        return scales.ToArray();
     }
 
     /// <summary>
