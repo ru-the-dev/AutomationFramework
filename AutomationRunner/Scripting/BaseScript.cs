@@ -11,7 +11,7 @@ public abstract class BaseScript : IAutomationScript
     
     public async Task ExecuteAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
     {
-        TimeSpan startDelay = TimeSpan.FromSeconds(5);
+        TimeSpan startDelay = TimeSpan.FromSeconds(2);
         Console.WriteLine($"Starting script: {Name} in {startDelay.TotalSeconds} seconds...");
         await Task.Delay(startDelay, cancellationToken);
 

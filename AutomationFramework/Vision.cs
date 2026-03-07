@@ -272,7 +272,10 @@ public sealed class Vision : IDisposable
             throw new InvalidOperationException("Template image is empty or could not be decoded.");
         }
 
-        var scales = GenerateScalesInBFSOrder();
+        // Generate scales in breadth-first order around 1.0:
+        // 1.0, 0.95, 1.05, 0.90, 1.10, ...
+        // This prioritizes likely scale matches before exploring farther values.
+        var scales = GenerateScalesInBFSOrder(minScale, maxScale, scaleStep);
 
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
@@ -281,11 +284,11 @@ public sealed class Vision : IDisposable
                 break;
             }
 
-            // Convert current screen region to OpenCV matrix once per attempt
+            // Capture once per attempt, then test all scales against the same frame.
             using var screenshot = CaptureScreenshot(region);
             using var searchMat = ConvertBitmapToMat(screenshot);
 
-            // Try each scale in BFS order (1.0, 0.8, 1.2, 0.6, 1.4, ...)
+            // Try each scale in BFS order around 1.0.
             foreach (var scale in scales)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -293,7 +296,7 @@ public sealed class Vision : IDisposable
                     break;
                 }
 
-                // Resize template to this scale
+                // Resize template to current test scale.
                 Mat scaledTemplate;
                 if (Math.Abs(scale - 1.0) > 0.001)
                 {
@@ -311,7 +314,8 @@ public sealed class Vision : IDisposable
                 {
                     if (scaledTemplate.Width > searchMat.Width || scaledTemplate.Height > searchMat.Height)
                     {
-                        continue; // Template too large at this scale, try next scale
+                        // Template cannot fit inside current search image at this scale.
+                        continue;
                     }
 
                     var resultWidth = searchMat.Width - scaledTemplate.Width + 1;
@@ -329,6 +333,8 @@ public sealed class Vision : IDisposable
 
                     if (confidence >= minConfidence)
                     {
+                        // Return the first confidence-qualified hit. Because scales are BFS-ordered,
+                        // this tends to find near-1.0 matches first and keeps runtime predictable.
                         var localBounds = new Rectangle(
                             location.X,
                             location.Y,
@@ -358,8 +364,20 @@ public sealed class Vision : IDisposable
 
     private static double[] GenerateScalesInBFSOrder(double minScale = 0.2, double maxScale = 2.0, double interval = 0.2)
     {
+        if (interval <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(interval), "interval must be greater than zero.");
+        }
+
+        if (minScale <= 0 || maxScale <= 0 || minScale > maxScale)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minScale), "Scale bounds must be positive and minScale <= maxScale.");
+        }
+
         var scales = new List<double> { 1.0 };
 
+        // Expand outward from 1.0 equally in both directions.
+        // Example with interval 0.2: 1.0, 0.8, 1.2, 0.6, 1.4, ...
         for (double offset = interval; offset <= 1.0; offset += interval)
         {
             double below = 1.0 - offset;
@@ -377,6 +395,274 @@ public sealed class Vision : IDisposable
         }
 
         return scales.ToArray();
+    }
+
+    /// <summary>
+    /// Finds a template using edge pyramid template matching, which is more robust to color/theme changes.
+    /// </summary>
+    /// <param name="templateImage">Template file name under the configured template folder.</param>
+    /// <param name="minConfidence">Minimum accepted match confidence [0..1].</param>
+    /// <param name="searchRegion">Optional area to search inside. Null means full virtual desktop.</param>
+    /// <param name="attempts">How many capture+match retries to perform.</param>
+    /// <param name="retryDelayMs">Delay between retries in milliseconds.</param>
+    /// <param name="pyramidLevels">Number of image pyramid levels to compare.</param>
+    /// <param name="cannyThreshold1">First Canny threshold for edge extraction.</param>
+    /// <param name="cannyThreshold2">Second Canny threshold for edge extraction.</param>
+    /// <param name="minColorCorrelation">Minimum HSV histogram correlation [0..1] for color verification.</param>
+    /// <param name="cancellationToken">Cancellation token for cooperative cancel.</param>
+    /// <returns>The best edge-based match if confidence qualifies; otherwise null.</returns>
+    public async Task<ImageMatchResult?> FindImageByEdgePyramidAsync(
+        string templateImage,
+        double minConfidence = 0.8,
+        Rectangle? searchRegion = null,
+        int attempts = 10,
+        int retryDelayMs = 250,
+        int pyramidLevels = 4,
+        double cannyThreshold1 = 50,
+        double cannyThreshold2 = 150,
+        double minColorCorrelation = 0,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentException.ThrowIfNullOrWhiteSpace(templateImage);
+
+        var templateImagePath = Path.Combine(_options.TemplatePath, templateImage);
+        if (!File.Exists(templateImagePath))
+        {
+            throw new FileNotFoundException("Template image was not found.", templateImagePath);
+        }
+
+        var templateMat = VisionTemplateResourceManager.Acquire(templateImagePath);
+        try
+        {
+            return await FindImageByEdgePyramidAsync(
+                templateMat,
+                minConfidence,
+                searchRegion,
+                attempts,
+                retryDelayMs,
+                pyramidLevels,
+                cannyThreshold1,
+                cannyThreshold2,
+                minColorCorrelation,
+                cancellationToken);
+        }
+        finally
+        {
+            VisionTemplateResourceManager.Release(templateImagePath);
+        }
+    }
+
+    /// <summary>
+    /// Finds a bitmap template using edge pyramid template matching.
+    /// </summary>
+    /// <param name="templateBitmap">Template image in memory.</param>
+    /// <param name="minConfidence">Minimum accepted match confidence [0..1].</param>
+    /// <param name="searchRegion">Optional area to search inside. Null means full virtual desktop.</param>
+    /// <param name="attempts">How many capture+match retries to perform.</param>
+    /// <param name="retryDelayMs">Delay between retries in milliseconds.</param>
+    /// <param name="pyramidLevels">Number of image pyramid levels to compare.</param>
+    /// <param name="cannyThreshold1">First Canny threshold for edge extraction.</param>
+    /// <param name="cannyThreshold2">Second Canny threshold for edge extraction.</param>
+    /// <param name="minColorCorrelation">Minimum HSV histogram correlation [0..1] for color verification.</param>
+    /// <param name="cancellationToken">Cancellation token for cooperative cancel.</param>
+    /// <returns>The best edge-based match if confidence qualifies; otherwise null.</returns>
+    public async Task<ImageMatchResult?> FindImageByEdgePyramidAsync(
+        Bitmap templateBitmap,
+        double minConfidence = 0.8,
+        Rectangle? searchRegion = null,
+        int attempts = 10,
+        int retryDelayMs = 250,
+        int pyramidLevels = 4,
+        double cannyThreshold1 = 50,
+        double cannyThreshold2 = 150,
+        double minColorCorrelation = 0.0,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(templateBitmap);
+
+        using var templateMat = ConvertBitmapToMat(templateBitmap);
+        return await FindImageByEdgePyramidAsync(
+            templateMat,
+            minConfidence,
+            searchRegion,
+            attempts,
+            retryDelayMs,
+            pyramidLevels,
+            cannyThreshold1,
+            cannyThreshold2,
+            minColorCorrelation,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Finds an in-memory template using edge pyramid template matching.
+    /// </summary>
+    /// <param name="templateMat">Template image in OpenCV matrix form.</param>
+    /// <param name="minConfidence">Minimum accepted match confidence [0..1].</param>
+    /// <param name="searchRegion">Optional area to search inside. Null means full virtual desktop.</param>
+    /// <param name="attempts">How many capture+match retries to perform.</param>
+    /// <param name="retryDelayMs">Delay between retries in milliseconds.</param>
+    /// <param name="pyramidLevels">Number of image pyramid levels to compare.</param>
+    /// <param name="cannyThreshold1">First Canny threshold for edge extraction.</param>
+    /// <param name="cannyThreshold2">Second Canny threshold for edge extraction.</param>
+    /// <param name="minColorCorrelation">Minimum HSV histogram correlation [0..1] for color verification.</param>
+    /// <param name="cancellationToken">Cancellation token for cooperative cancel.</param>
+    /// <returns>The best edge-based match if confidence qualifies; otherwise null.</returns>
+    public async Task<ImageMatchResult?> FindImageByEdgePyramidAsync(
+        Mat templateMat,
+        double minConfidence = 0.8,
+        Rectangle? searchRegion = null,
+        int attempts = 10,
+        int retryDelayMs = 250,
+        int pyramidLevels = 4,
+        double cannyThreshold1 = 50,
+        double cannyThreshold2 = 150,
+        double minColorCorrelation = 0.0,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        if (minConfidence is < 0 or > 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minConfidence), "minConfidence must be between 0 and 1.");
+        }
+
+        if (attempts <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(attempts), "attempts must be greater than zero.");
+        }
+
+        if (retryDelayMs < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(retryDelayMs), "retryDelayMs cannot be negative.");
+        }
+
+        if (pyramidLevels <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pyramidLevels), "pyramidLevels must be greater than zero.");
+        }
+
+        if (minColorCorrelation is < 0 or > 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minColorCorrelation), "minColorCorrelation must be between 0 and 1.");
+        }
+
+        if (templateMat.Empty())
+        {
+            throw new InvalidOperationException("Template image is empty or could not be decoded.");
+        }
+
+        var region = NormalizeRegion(searchRegion);
+
+        // Build template edges once, then construct template pyramid once.
+        // This is reused across attempts to avoid repeated preprocessing.
+        using var templateEdges = BuildEdgeMap(templateMat, cannyThreshold1, cannyThreshold2);
+        var templatePyramid = BuildPyramid(templateEdges, pyramidLevels);
+
+        try
+        {
+            for (var attempt = 1; attempt <= attempts; attempt++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                using var screenshot = CaptureScreenshot(region);
+                using var searchMat = ConvertBitmapToMat(screenshot);
+                using var searchEdges = BuildEdgeMap(searchMat, cannyThreshold1, cannyThreshold2);
+
+                // Rebuild search pyramid every attempt because screen content may change.
+                var searchPyramid = BuildPyramid(searchEdges, pyramidLevels);
+                try
+                {
+                    double bestConfidence = -1;
+                    Rectangle bestBounds = Rectangle.Empty;
+
+                    for (var level = 0; level < pyramidLevels; level++)
+                    {
+                        var templateLevel = templatePyramid[level];
+                        var searchLevel = searchPyramid[level];
+
+                        if (templateLevel.Width > searchLevel.Width || templateLevel.Height > searchLevel.Height)
+                        {
+                            continue;
+                        }
+
+                        var resultWidth = searchLevel.Width - templateLevel.Width + 1;
+                        var resultHeight = searchLevel.Height - templateLevel.Height + 1;
+
+                        using var resultMat = new Mat(resultHeight, resultWidth, MatType.CV_32FC1);
+                        Cv2.MatchTemplate(searchLevel, templateLevel, resultMat, _options.TemplateMatchMode);
+                        Cv2.MinMaxLoc(resultMat, out var minValue, out var maxValue, out var minLocation, out var maxLocation);
+
+                        var (confidence, location) = IsLowerScoreBetter(_options.TemplateMatchMode)
+                            ? (1 - minValue, minLocation)
+                            : (maxValue, maxLocation);
+
+                        if (confidence <= bestConfidence)
+                        {
+                            continue;
+                        }
+
+                        // Level N in a pyramid is downsampled by 2^N in each axis,
+                        // so convert local coordinates back to level-0 coordinates.
+                        var scaleFactor = 1 << level;
+                        bestConfidence = confidence;
+                        bestBounds = new Rectangle(
+                            location.X * scaleFactor,
+                            location.Y * scaleFactor,
+                            templateLevel.Width * scaleFactor,
+                            templateLevel.Height * scaleFactor);
+                    }
+
+                    if (bestConfidence >= minConfidence && bestBounds.Width > 0 && bestBounds.Height > 0)
+                    {
+                        // Edge matching is shape-focused; this color verification step rejects
+                        // similarly shaped false positives that differ in color distribution.
+                        var clampedBounds = ClampToImageBounds(bestBounds, searchMat.Width, searchMat.Height);
+                        if (clampedBounds == Rectangle.Empty)
+                        {
+                            continue;
+                        }
+
+                        // Color verification is optional. Use a positive threshold to enable it.
+                        if (minColorCorrelation > 0)
+                        {
+                            var colorCorrelation = ComputeHsvColorCorrelation(templateMat, searchMat, clampedBounds);
+                            if (colorCorrelation < minColorCorrelation)
+                            {
+                                continue;
+                            }
+                        }
+
+                        return new ImageMatchResult(clampedBounds, bestConfidence, region);
+                    }
+                }
+                finally
+                {
+                    // Each pyramid level owns unmanaged buffers; release promptly.
+                    foreach (var mat in searchPyramid)
+                    {
+                        mat.Dispose();
+                    }
+                }
+
+                if (attempt < attempts && retryDelayMs > 0)
+                {
+                    await Task.Delay(retryDelayMs, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        finally
+        {
+            // Template pyramid is shared across attempts and disposed once here.
+            foreach (var mat in templatePyramid)
+            {
+                mat.Dispose();
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -583,6 +869,163 @@ public sealed class Vision : IDisposable
     {
         // SqDiff modes represent better matches with lower values.
         return mode is TemplateMatchModes.SqDiff or TemplateMatchModes.SqDiffNormed;
+    }
+
+    private static Mat BuildEdgeMap(Mat source, double cannyThreshold1, double cannyThreshold2)
+    {
+        // Normalize to grayscale first to keep edge extraction consistent across color themes.
+        using var gray = new Mat();
+        if (source.Channels() == 1)
+        {
+            source.CopyTo(gray);
+        }
+        else
+        {
+            Cv2.CvtColor(source, gray, ColorConversionCodes.BGR2GRAY);
+        }
+
+        using var blurred = new Mat();
+        // Light blur reduces tiny texture noise that can destabilize Canny edges.
+        Cv2.GaussianBlur(gray, blurred, new OpenCvSharp.Size(3, 3), 0);
+
+        var edges = new Mat();
+        Cv2.Canny(blurred, edges, cannyThreshold1, cannyThreshold2);
+        return edges;
+    }
+
+    /// <summary>
+    /// Builds an image pyramid where each next level is downsampled by 2.
+    /// </summary>
+    /// <param name="source">Input image.</param>
+    /// <param name="levels">Maximum number of levels to create.</param>
+    /// <returns>List of level images from full size to smallest level.</returns>
+    private static List<Mat> BuildPyramid(Mat source, int levels)
+    {
+        var pyramid = new List<Mat>(levels);
+        var level0 = source.Clone();
+        pyramid.Add(level0);
+
+        for (var level = 1; level < levels; level++)
+        {
+            if (pyramid[level - 1].Width <= 1 || pyramid[level - 1].Height <= 1)
+            {
+                break;
+            }
+
+            var next = new Mat();
+            Cv2.PyrDown(pyramid[level - 1], next);
+            pyramid.Add(next);
+        }
+
+        return pyramid;
+    }
+
+    private static Rectangle ClampToImageBounds(Rectangle bounds, int imageWidth, int imageHeight)
+    {
+        var left = Math.Clamp(bounds.Left, 0, imageWidth);
+        var top = Math.Clamp(bounds.Top, 0, imageHeight);
+        var right = Math.Clamp(bounds.Right, 0, imageWidth);
+        var bottom = Math.Clamp(bounds.Bottom, 0, imageHeight);
+
+        var width = right - left;
+        var height = bottom - top;
+        if (width <= 0 || height <= 0)
+        {
+            return Rectangle.Empty;
+        }
+
+        return new Rectangle(left, top, width, height);
+    }
+
+    private static double ComputeHsvColorCorrelation(Mat templateMat, Mat searchMat, Rectangle candidateBounds)
+    {
+        using var searchRoi = new Mat(searchMat, new OpenCvSharp.Rect(candidateBounds.X, candidateBounds.Y, candidateBounds.Width, candidateBounds.Height));
+        using var resizedTemplate = new Mat();
+        Cv2.Resize(templateMat, resizedTemplate, new OpenCvSharp.Size(candidateBounds.Width, candidateBounds.Height), interpolation: InterpolationFlags.Linear);
+
+        using var templateBgr = new Mat();
+        if (resizedTemplate.Channels() == 1)
+        {
+            Cv2.CvtColor(resizedTemplate, templateBgr, ColorConversionCodes.GRAY2BGR);
+        }
+        else
+        {
+            resizedTemplate.CopyTo(templateBgr);
+        }
+
+        using var searchBgr = new Mat();
+        if (searchRoi.Channels() == 1)
+        {
+            Cv2.CvtColor(searchRoi, searchBgr, ColorConversionCodes.GRAY2BGR);
+        }
+        else
+        {
+            searchRoi.CopyTo(searchBgr);
+        }
+
+        using var templateHsv = new Mat();
+        using var searchHsv = new Mat();
+        Cv2.CvtColor(templateBgr, templateHsv, ColorConversionCodes.BGR2HSV);
+        Cv2.CvtColor(searchBgr, searchHsv, ColorConversionCodes.BGR2HSV);
+
+        // Low-saturation UI (white/gray text/buttons) makes hue unstable.
+        // Use Value-channel histograms in that case; otherwise blend HS + V.
+        var templateMean = Cv2.Mean(templateHsv);
+        var searchMean = Cv2.Mean(searchHsv);
+        var lowSaturation = templateMean.Val1 < 25 && searchMean.Val1 < 25;
+
+        var valueCorrelation = ComputeHistogramCorrelation(
+            templateHsv,
+            searchHsv,
+            [2],
+            [32],
+            [new Rangef(0, 256)]);
+
+        double score;
+        if (lowSaturation)
+        {
+            score = valueCorrelation;
+        }
+        else
+        {
+            var hsCorrelation = ComputeHistogramCorrelation(
+                templateHsv,
+                searchHsv,
+                [0, 1],
+                [30, 32],
+                [new Rangef(0, 180), new Rangef(0, 256)]);
+            score = (0.75 * hsCorrelation) + (0.25 * valueCorrelation);
+        }
+
+        if (double.IsNaN(score) || double.IsInfinity(score))
+        {
+            return -1;
+        }
+
+        return score;
+    }
+
+    private static double ComputeHistogramCorrelation(
+        Mat templateHsv,
+        Mat searchHsv,
+        int[] channels,
+        int[] histSize,
+        Rangef[] ranges)
+    {
+        using var templateHist = new Mat();
+        using var searchHist = new Mat();
+        Cv2.CalcHist([templateHsv], channels, null, templateHist, channels.Length, histSize, ranges);
+        Cv2.CalcHist([searchHsv], channels, null, searchHist, channels.Length, histSize, ranges);
+
+        if (Cv2.CountNonZero(templateHist) == 0 || Cv2.CountNonZero(searchHist) == 0)
+        {
+            return -1;
+        }
+
+        Cv2.Normalize(templateHist, templateHist, 1, 0, NormTypes.L1);
+        Cv2.Normalize(searchHist, searchHist, 1, 0, NormTypes.L1);
+
+        return Cv2.CompareHist(templateHist, searchHist, HistCompMethods.Correl);
     }
 
     private void ThrowIfDisposed()

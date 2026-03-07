@@ -67,21 +67,25 @@ public sealed class VisionTest : BaseScript
 
     protected override async Task RunAsync(ScriptExecutionContext context, CancellationToken cancellationToken)
     {
-        var res = await _vision.FindImageAsync
+        var res = await _vision.FindImageByEdgePyramidAsync
         (
-            _templates[VisionTemplateFileNames.TsmMailSelectedGroupsButton],
-            0.80, 
+            _templates[VisionTemplateFileNames.TailoringButton],
+            minConfidence: 0.80,
+            minColorCorrelation: 0.25,
+            attempts: 5,
+            searchRegion: Screen.PrimaryScreen?.Bounds,
             cancellationToken: cancellationToken
         );
 
-        if (res != null)
+        if (res == null)
         {
-            Console.WriteLine("Found!");
+            System.Console.WriteLine("Image not found.");
+            return;
         }
-        else
-        {
-            Console.WriteLine("Not found.");
-        }
+
+        var target = res.ToGlobalBounds().Center();
+        Console.WriteLine($"Found match with confidence {res.Confidence:F3} at {res.ToGlobalBounds()}");
+        await _cursor.MoveToAsync(target, cancellationToken: cancellationToken);
 
     }   
 
