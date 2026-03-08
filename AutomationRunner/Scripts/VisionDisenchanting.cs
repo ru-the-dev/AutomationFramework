@@ -65,18 +65,18 @@ public sealed class VisionDisenchanting : BaseScript
 
             
             // find and click the "open all mail" button with retries, if not found, end the script
-            if (await FindAndClickImageTemplateAsync(_templates[VisionTemplateFileNames.TSM_OPEN_ALL_MAIL], bounds => bounds.Padd(40, 2), cancellationToken) == false)
+            if (await FindAndClickImageTemplateAsync(_templates[VisionTemplateFileNames.TSM_OPEN_ALL_MAIL], bounds => bounds.Padd(40, 2), cancellationToken: cancellationToken) == false)
             {
                 Console.WriteLine("Open all mail button not found.");
                 return;
             }
         
             // wait for all mail to open
-            await Task.Delay(TimeSpan.FromSeconds(10).ApplyRandomFactor(), cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(15).ApplyRandomFactor(), cancellationToken);
 
 
             // find the "close mailbox" button with retries, if not found, end the script
-            if (await FindAndClickImageTemplateAsync(_templates[VisionTemplateFileNames.TSM_CLOSE_BTN], bounds => bounds.Inset(2), cancellationToken) == false)
+            if (await FindAndClickImageTemplateAsync(_templates[VisionTemplateFileNames.TSM_CLOSE_BTN], bounds => bounds.Inset(2), cancellationToken: cancellationToken) == false)
             {
                 Console.WriteLine("Close mailbox button not found.");
                 return;
@@ -84,15 +84,8 @@ public sealed class VisionDisenchanting : BaseScript
 
             // =========== disenchanting ============
 
-            // find and open TSM destroy action bar button with retries
-            if (await FindAndClickImageTemplateAsync(_templates[VisionTemplateFileNames.AB_TSM_DESTROY_BTN], bounds => bounds.Inset(10), cancellationToken) == false)
-            {
-                Console.WriteLine("TSM destroy action bar button not found.");
-                return;
-            }
-            
             int iterations = Random.Shared.Next(100, 120);
-
+            
             for (int i = 0; i < iterations; i++)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -100,15 +93,10 @@ public sealed class VisionDisenchanting : BaseScript
                     break;
                 }
 
-                // Find and click the "destroy next button
-                if (await FindAndClickImageTemplateAsync(_templates[VisionTemplateFileNames.TSM_DESTROY_NEXT_BTN], bounds => bounds.Padd(40, 2), cancellationToken) == false)
-                {
-                    Console.WriteLine("TSM destroy next button not found.");
-                    continue;
-                }
-
+                await _keyboard.PressKeyAsync(AutomationFramework.VirtualKey.D9);
+                
                 // Wait a random time between clicks to mimic human behavior
-                await Task.Delay(TimeSpan.FromSeconds(3).ApplyRandomFactor(), cancellationToken);
+                await Task.Delay(TimeSpan.FromSeconds(2.2).ApplyRandomFactor(1f, 1.2f), cancellationToken);
             }
         }
 
@@ -125,15 +113,16 @@ public sealed class VisionDisenchanting : BaseScript
     }
 
 
-    private async Task<bool> FindAndClickImageTemplateAsync(Mat template, Func<Rectangle, Rectangle>? boundsManipulations = null, CancellationToken cancellationToken = default)
+    private async Task<bool> FindAndClickImageTemplateAsync(Mat template, Func<Rectangle, Rectangle>? boundsManipulations = null, float confidence = 0.7f, CancellationToken cancellationToken = default)
     {
-        // find the "open all mail" button with retries
+        // find the template on screen with retries, if not found, return false
         var imageMatch = await Task.RunWithRetry
         (
             () => _vision.FindImageAsync
             (
                 template,
-                0.7,
+                confidence,
+                searchRegion: Screen.PrimaryScreen?.Bounds,
                 cancellationToken: cancellationToken
             ),
             successCondition: (result) => result != null,
