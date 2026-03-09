@@ -72,7 +72,7 @@ public sealed class VisionDisenchanting : BaseScript
             }
         
             // wait for all mail to open
-            await Task.Delay(TimeSpan.FromSeconds(15).ApplyRandomFactor(), cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(35).ApplyRandomFactor(), cancellationToken);
 
 
             // find the "close mailbox" button with retries, if not found, end the script
