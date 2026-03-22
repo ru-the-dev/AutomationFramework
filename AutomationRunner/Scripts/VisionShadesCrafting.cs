@@ -43,7 +43,6 @@ public sealed class VisionShadesCrafting : BaseScript
             VisionTemplateFileNames.TSM_MAIL_SELECTED_GROUPS_BTN
         );
 
-
         return Task.CompletedTask;
     }
 
