@@ -37,6 +37,8 @@ public sealed class Keyboard
 
     private readonly Options _options;
 
+    private readonly SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+
     public Keyboard(Options? options = null)
     {
         _options = options ?? new Options();
@@ -46,33 +48,49 @@ public sealed class Keyboard
     /// <summary>
     /// Sends a key down event for a virtual-key code.
     /// </summary>
-    public void KeyDown(VirtualKey virtualKey)
+    public Task KeyDownAsync(VirtualKey virtualKey, CancellationToken cancellationToken = default)
     {
-        KeyDown((ushort)virtualKey);
+        return KeyDownAsync((ushort)virtualKey, cancellationToken);
     }
 
     /// <summary>
     /// Sends a key down event for a virtual-key code.
     /// </summary>
-    public void KeyDown(ushort virtualKey)
+    public async Task KeyDownAsync(ushort virtualKey, CancellationToken cancellationToken = default)
     {
-        InputNative.SendKeyDown(virtualKey);
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            InputNative.SendKeyDown(virtualKey);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
     }
 
     /// <summary>
     /// Sends a key up event for a virtual-key code.
     /// </summary>
-    public void KeyUp(VirtualKey virtualKey)
+    public Task KeyUpAsync(VirtualKey virtualKey, CancellationToken cancellationToken = default)
     {
-        KeyUp((ushort)virtualKey);
+        return KeyUpAsync((ushort)virtualKey, cancellationToken);
     }
 
     /// <summary>
     /// Sends a key up event for a virtual-key code.
     /// </summary>
-    public void KeyUp(ushort virtualKey)
+    public async Task KeyUpAsync(ushort virtualKey, CancellationToken cancellationToken = default)
     {
-        InputNative.SendKeyUp(virtualKey);
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            InputNative.SendKeyUp(virtualKey);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
     }
 
     /// <summary>
@@ -94,17 +112,25 @@ public sealed class Keyboard
         TimeSpan? holdDuration = null,
         CancellationToken cancellationToken = default)
     {
-        holdDuration = holdDuration ?? _options.DefaultKeyPressDuration;
-        holdDuration = TimespanExtensions.ApplyRandomFactor(holdDuration.Value, _options.MinDurationFactor, _options.MaxDurationFactor);
-
-        KeyDown(virtualKey);
-
-        if (holdDuration > TimeSpan.Zero)
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            await Task.Delay(holdDuration.Value, cancellationToken).ConfigureAwait(false);
-        }
+            holdDuration ??= _options.DefaultKeyPressDuration;
+            holdDuration = TimespanExtensions.ApplyRandomFactor(holdDuration.Value, _options.MinDurationFactor, _options.MaxDurationFactor);
 
-        KeyUp(virtualKey);
+            InputNative.SendKeyDown(virtualKey);
+
+            if (holdDuration > TimeSpan.Zero)
+            {
+                await Task.Delay(holdDuration.Value, cancellationToken).ConfigureAwait(false);
+            }
+
+            InputNative.SendKeyUp(virtualKey);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
     }
 
 
@@ -124,39 +150,37 @@ public sealed class Keyboard
             throw new ArgumentException("At least one key is required.", nameof(virtualKeys));
         }
 
-        holdDuration ??= _options.DefaultKeyPressDuration;
-        keypressInterval ??= _options.DefaultKeyPressDuration;
-
-        foreach (var key in virtualKeys)
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            KeyDown(key);
-            var interval = keypressInterval.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
-            await Task.Delay(interval, cancellationToken).ConfigureAwait(false); 
+
+            holdDuration ??= _options.DefaultKeyPressDuration;
+            keypressInterval ??= _options.DefaultKeyPressDuration;
+
+            foreach (var key in virtualKeys)
+            {
+                InputNative.SendKeyDown((ushort)key);
+                var interval = keypressInterval.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
+                await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (holdDuration > TimeSpan.Zero)
+            {
+                var durationRandomized = holdDuration.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
+                await Task.Delay(durationRandomized, cancellationToken).ConfigureAwait(false);
+            }
+
+            for (var index = virtualKeys.Length - 1; index >= 0; index--)
+            {
+                // TODO: consider adding a small random delay between key releases to better simulate human behavior.
+                InputNative.SendKeyUp((ushort)virtualKeys[index]);
+                var interval = keypressInterval.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor) * 0.5f;
+                await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+            }
         }
-
-        if (holdDuration > TimeSpan.Zero)
+        finally
         {
-            var durationRandomized = holdDuration.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
-            await Task.Delay(durationRandomized, cancellationToken).ConfigureAwait(false);
-        }
-
-        for (var index = virtualKeys.Length - 1; index >= 0; index--)
-        {
-            //TODO: consider adding a small random delay between key releases to better simulate human behavior.
-            KeyUp(virtualKeys[index]);
-        }
-    }
-
-    /// <summary>
-    /// Types text as Unicode keyboard input.
-    /// </summary>
-    public void TypeText(string text)
-    {
-        ArgumentNullException.ThrowIfNull(text);
-
-        foreach (var character in text)
-        {
-            InputNative.SendUnicodeChar(character);
+            _semaphore.Release();
         }
     }
 
@@ -170,18 +194,27 @@ public sealed class Keyboard
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        charDelay ??= _options.DefaultKeyPressDuration;
-
-        foreach (var character in text)
+        await _semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            InputNative.SendUnicodeChar(character);
 
-            if (charDelay > TimeSpan.Zero)
+            charDelay ??= _options.DefaultKeyPressDuration;
+
+            foreach (var character in text)
             {
-                var randomizedDelay = charDelay.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
-                await Task.Delay(randomizedDelay, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                InputNative.SendUnicodeChar(character);
+
+                if (charDelay > TimeSpan.Zero)
+                {
+                    var randomizedDelay = charDelay.Value.ApplyRandomFactor(_options.MinDurationFactor, _options.MaxDurationFactor);
+                    await Task.Delay(randomizedDelay, cancellationToken).ConfigureAwait(false);
+                }
             }
+        }
+        finally
+        {
+            _semaphore.Release();
         }
     }
 }
