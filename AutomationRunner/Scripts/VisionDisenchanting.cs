@@ -52,15 +52,18 @@ public sealed class VisionDisenchanting : BaseScript
     
     public override void Dispose()
     {
-        // Release templates
-        foreach (var templateLease in _templateLeases.Values)
+       if (_templateLeases != null)
         {
-            templateLease.Dispose();
+            // Release templates
+            foreach (var templateLease in _templateLeases.Values)
+            {
+                templateLease.Dispose();
+            }
+            _templateLeases.Clear();
         }
-        _templateLeases.Clear();
 
         // Dispose vision
-        _vision.Dispose();
+        _vision?.Dispose();
     }
 
     protected override async Task RunAsync(CancellationToken cancellationToken)
